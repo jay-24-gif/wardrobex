@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import QRCode from 'qrcode'
 import apiClient from '../api/client'
 import { SearchIcon, CartIcon, CreditCardIcon, ReceiptIcon, PrinterIcon, CloseIcon } from '../components/icons'
 
@@ -10,6 +11,7 @@ export default function POS() {
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [amountPaid, setAmountPaid] = useState('')
   const [gcashRef, setGcashRef] = useState('')
+  const [gcashQrDataUrl, setGcashQrDataUrl] = useState('')
   const [error, setError] = useState('')
   const [paymentError, setPaymentError] = useState('')
   const [receipt, setReceipt] = useState(null)
@@ -70,30 +72,36 @@ export default function POS() {
   const totalAmount = Math.max(0, subtotal - discountAmount)
   const changeDue = amountPaid ? Math.max(0, Number(amountPaid) - totalAmount) : 0
 
-function openPaymentModal() {
-  setError('')
-  if (cart.length === 0) {
-    setError('Cart is empty')
-    return
+  function openPaymentModal() {
+    setError('')
+    if (cart.length === 0) {
+      setError('Cart is empty')
+      return
+    }
+    setPaymentError('')
+    setAmountPaid('')
+    setGcashRef(`WX-${Date.now().toString().slice(-8)}`)
+    setShowPaymentModal(true)
   }
-  setPaymentError('')
-  setAmountPaid('')
-  setGcashRef(`WX-${Date.now().toString().slice(-8)}`)
-  setShowPaymentModal(true)
-}
 
-// GCash is an exact digital payment (no physical change) — auto-fill the
-// tendered amount and refresh the QR whenever the method or total changes.
-useEffect(() => {
-  if (showPaymentModal && paymentMethod === 'gcash') {
-    setAmountPaid(totalAmount.toFixed(2))
-  }
-}, [paymentMethod, showPaymentModal, totalAmount])
+  // GCash is an exact digital payment (no physical change) — auto-fill the
+  // tendered amount whenever the method or total changes.
+  useEffect(() => {
+    if (showPaymentModal && paymentMethod === 'gcash') {
+      setAmountPaid(totalAmount.toFixed(2))
+    }
+  }, [paymentMethod, showPaymentModal, totalAmount])
 
-const gcashQrData = encodeURIComponent(
-  `WardrobeX Payment\nRef: ${gcashRef}\nAmount: PHP ${totalAmount.toFixed(2)}`
-)
-const gcashQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=10&data=${gcashQrData}`
+  // Generate the GCash QR code entirely offline (no external API call),
+  // so it still works during the presentation even without internet access.
+  useEffect(() => {
+    if (showPaymentModal && paymentMethod === 'gcash' && gcashRef) {
+      const payload = `WardrobeX Payment\nRef: ${gcashRef}\nAmount: PHP ${totalAmount.toFixed(2)}`
+      QRCode.toDataURL(payload, { width: 180, margin: 1 })
+        .then(setGcashQrDataUrl)
+        .catch(() => setGcashQrDataUrl(''))
+    }
+  }, [showPaymentModal, paymentMethod, gcashRef, totalAmount])
 
   async function handleCompleteSale() {
     setPaymentError('')
@@ -277,21 +285,27 @@ const gcashQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&mar
               </select>
             </div>
 
-        {paymentMethod === 'gcash' ? (
-          <div className="mb-4 flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50 py-4">
-            <img
-              src={gcashQrUrl}
-              alt="GCash payment QR code"
-              width={160}
-              height={160}
-              className="rounded-lg bg-white p-2 shadow-sm"
-            />
-            <p className="mt-3 text-sm font-semibold text-slate-700">
-              Scan with GCash to pay ₱{totalAmount.toFixed(2)}
-            </p>
-            <p className="text-xs text-slate-400">Ref No. {gcashRef}</p>
-          </div>
-        ) : (
+            {paymentMethod === 'gcash' ? (
+              <div className="mb-4 flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50 py-4">
+                {gcashQrDataUrl ? (
+                  <img
+                    src={gcashQrDataUrl}
+                    alt="GCash payment QR code"
+                    width={160}
+                    height={160}
+                    className="rounded-lg bg-white p-2 shadow-sm"
+                  />
+                ) : (
+                  <div className="flex h-40 w-40 items-center justify-center rounded-lg bg-white text-xs text-slate-400 shadow-sm">
+                    Generating QR...
+                  </div>
+                )}
+                <p className="mt-3 text-sm font-semibold text-slate-700">
+                  Scan with GCash to pay ₱{totalAmount.toFixed(2)}
+                </p>
+                <p className="text-xs text-slate-400">Ref No. {gcashRef}</p>
+              </div>
+            ) : (
               <div className="mb-3">
                 <label className="mb-1 block text-xs font-medium text-slate-500">Amount Tendered (₱)</label>
                 <input
@@ -310,11 +324,6 @@ const gcashQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&mar
               <span className="font-semibold text-slate-800">
                 ₱{paymentMethod === 'gcash' ? totalAmount.toFixed(2) : changeDue.toFixed(2)}
               </span>
-            </div>
-
-            <div className="mb-4 flex items-center justify-between text-sm">
-              <span className="text-slate-500">Change</span>
-              <span className="font-semibold text-slate-800">₱{changeDue.toFixed(2)}</span>
             </div>
 
             {paymentError && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{paymentError}</p>}
